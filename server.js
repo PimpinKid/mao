@@ -972,6 +972,17 @@ app.get('/api/user/orders', strictGlobalAuthenticate, async (req, res) => {
     }
 });
 
+
+// GET /api/activity (Public live activity feed)
+app.get('/api/activity', async (req, res) => {
+    try {
+        const activities = await dbAll("SELECT from_currency, to_currency, amount_give as amount, status, created_at FROM orders ORDER BY created_at DESC LIMIT 15");
+        res.json({ success: true, data: activities || [] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // 3. POST /api/orders (Create classic exchange order)
 app.post('/api/orders', strictGlobalAuthenticate, async (req, res) => {
     const { from_currency, to_currency, amount_give, amount_get, user_wallet, from_network, to_network } = req.body;

@@ -3739,96 +3739,71 @@ function openMakerVerificationModal() {
     const coins = ['USDT', 'BTC', 'ETH', 'USDC', 'SOL', 'BNB', 'TON', 'TRX', 'XRP', 'DOGE', 'LTC'];
     const fiats = ['RUB'];
     
-    function populateInitialActivity() {
-        const tbody = document.getElementById('activity-tbody');
-        if(!tbody) return;
-        tbody.innerHTML = '';
-        
-        // Generate 8 initial times in increasing order (e.g., 1 min, 3 min, 5 min)
-        let times = [];
-        let currTime = 1;
-        for (let i = 0; i < 8; i++) {
-            times.push(currTime);
-            currTime += Math.floor(Math.random() * 3) + 1;
-        }
-        
-        for (let i = 0; i < 8; i++) {
-            generateRandomActivity(false, times[i]);
-        }
+    
+    function loadActivityFeed() {
+        fetch('/api/activity')
+            .then(res => res.json())
+            .then(data => {
+                if (!data.success || !data.data) return;
+                const tbody = document.getElementById('activity-tbody');
+                if (!tbody) return;
+                
+                tbody.innerHTML = '';
+                
+                data.data.forEach(order => {
+                    const tr = document.createElement('tr');
+                    
+                    const direction = `${order.from_currency} -> ${order.to_currency}`;
+                    
+                    // Show amount with currency
+                    const amountText = parseFloat(order.amount).toLocaleString('ru-RU') + ' ' + order.from_currency;
+                    
+                    let statClass = 'completed';
+                    let statTitle = currentLang === 'en' ? 'Completed' : 'Завершено';
+                    
+                    if (order.status === 'pending' || order.status === 'new' || order.status === 'in_progress') {
+                        statClass = 'open';
+                        statTitle = currentLang === 'en' ? 'Pending' : 'В обработке';
+                    } else if (order.status === 'canceled' || order.status === 'cancelled') {
+                        statClass = 'cancelled';
+                        statTitle = currentLang === 'en' ? 'Cancelled' : 'Отменено';
+                    }
+                    
+                    const orderDate = new Date(order.created_at + 'Z');
+                    const now = new Date();
+                    const diffMs = Math.max(0, now - orderDate);
+                    const diffMins = Math.floor(diffMs / 60000);
+                    const diffHours = Math.floor(diffMins / 60);
+                    
+                    let timingText = '';
+                    if (diffMins < 1) {
+                        timingText = currentLang === 'en' ? 'just now' : 'только что';
+                    } else if (diffMins < 60) {
+                        timingText = currentLang === 'en' ? diffMins + ' min ago' : diffMins + ' мин назад';
+                    } else {
+                        timingText = currentLang === 'en' ? diffHours + ' hr ago' : diffHours + ' ч назад';
+                    }
+                    
+                    tr.innerHTML = 
+                        '<td><b>' + direction + '</b></td>' +
+                        '<td>' + amountText + '</td>' +
+                        '<td><span class="status-badge ' + statClass + '" data-stat-class="' + statClass + '">' + statTitle + '</span></td>' +
+                        '<td style="color: var(--text-muted);">' + timingText + '</td>';
+                        
+                    tbody.appendChild(tr);
+                });
+            })
+            .catch(err => console.error("Error loading activity feed:", err));
     }
 
-    function generateRandomActivity(prepend = true, specificTimeMin = null) {
-        const tbody = document.getElementById('activity-tbody');
-        if(!tbody) return;
-        
-        const isBuy = Math.random() > 0.5;
-        const coin = coins[Math.floor(Math.random() * coins.length)];
-        const fiat = fiats[Math.floor(Math.random() * fiats.length)];
-        const direction = isBuy ? `${coin} -> ${fiat}` : `${fiat} -> ${coin}`;
-        
-        // Always generate a logical fiat amount
-        let fiatAmount = Math.floor(Math.random() * 150000) + 5000; // 5k to 155k
-        // Then convert to crypto if we want to display crypto, or just show fiat
-        // To avoid confusion, let's just always display the fiat amount for the activity feed, since P2P trades are mostly measured in Fiat volume.
-        // Or show the coin amount. Let's show Coin amount AND Fiat amount? The design only has one column for amount.
-        // In the screenshot, the user has "0.0153 KZT" - that means it showed crypto value but appended the fiat currency!
-        // Let's fix it so it always shows the fiat amount with fiat currency, or crypto amount with crypto currency, correctly matching.
-        let amountText = '';
-        if (isBuy) {
-            // coin -> fiat. Selling coin, receiving fiat. Let's show Fiat amount.
-            amountText = fiatAmount.toLocaleString('ru-RU') + ' ' + fiat;
-        } else {
-            // fiat -> coin. Selling fiat, receiving coin. Let's show Fiat amount as well, it's easier and consistent.
-            amountText = fiatAmount.toLocaleString('ru-RU') + ' ' + fiat;
-        }
-        
-        const statusMapEng = { completed: 'Completed', open: 'Open', cancelled: 'Cancelled' };
-        const statusMapRus = { completed: 'Завершено', open: 'Открыт', cancelled: 'Отменено' };
-        
-        const statTitle = currentLang === 'en' ? statusMapEng['completed'] : statusMapRus['completed'];
-        
-        // Determine timing text
-        let timingText = '';
-        let timingIdx = 0;
-        if (prepend) {
-            timingIdx = 0; // "just now"
-        } else {
-            const minutes = specificTimeMin || (Math.floor(Math.random() * 15) + 1);
-            timingText = currentLang === 'en' ? minutes + ' min ago' : minutes + ' мин назад';
-        }
-        
-        if (prepend) {
-            timingText = currentLang === 'en' ? 'just now' : 'только что';
-        }
-
-        const tr = document.createElement('tr');
-        if (prepend) {
-            tr.style.animation = "flashGreen 1s ease-out";
-        }
-        
-        tr.innerHTML = 
-            '<td><b>' + direction + '</b></td>' +
-            '<td>' + amountText + '</td>' +
-            '<td><span class="status-badge completed" data-stat-class="completed">' + statTitle + '</span></td>' +
-            '<td data-timing-custom="' + (prepend ? 'now' : specificTimeMin) + '" style="color: var(--text-muted);">' + timingText + '</td>';
-            
-        if (prepend) {
-            tbody.insertBefore(tr, tbody.firstChild);
-            if (tbody.children.length > 8) {
-                tbody.removeChild(tbody.lastChild);
-            }
-            // Increase time of all subsequent rows slightly to simulate time passing? Not strictly necessary for UI feel.
-        } else {
-            tbody.appendChild(tr);
-        }
+    function populateInitialActivity() {
+        loadActivityFeed();
     }
 
     function scheduleActivity() {
-        const delay = Math.floor(Math.random() * 50000) + 10000;
-        setTimeout(() => {
-            generateRandomActivity(true);
-            scheduleActivity();
-        }, delay);
+        setInterval(loadActivityFeed, 15000);
+    }
+, delay);
     }
 
     function populateCurrencies() {
