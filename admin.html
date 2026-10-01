@@ -338,6 +338,7 @@
                             <thead class="bg-dark text-gray-400 text-xs uppercase border-b border-border sticky top-0 z-10">
                                 <tr>
                                     <th class="px-6 py-4 font-bold">ID</th>
+                                    <th class="px-6 py-4 font-bold">★</th>
                                     <th class="px-6 py-4 font-bold">Пользователь</th>
                                     <th class="px-6 py-4 font-bold">Wallet Address</th>
                                     <th class="px-6 py-4 font-bold">Баланс (RUB)</th>
@@ -1439,6 +1440,22 @@
             }
         }
 
+        async function togglePinUser(userId) {
+            try {
+                const res = await fetch(`${CRM_API}/api/admin/users/${userId}/pin`, {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+                if (res.ok) {
+                    loadAdminUsers();
+                } else {
+                    showAdminToast('Ошибка при закреплении', 'error');
+                }
+            } catch(e) {
+                showAdminToast('Ошибка при закреплении', 'error');
+            }
+        }
+
         function renderUsersTable(usersToRender) {
             const tbody = document.getElementById('users-table-body');
             if (!tbody) return;
@@ -1475,6 +1492,9 @@
 
                 tr.innerHTML = `
                     <td class="px-6 py-4 font-mono font-bold text-gray-400">#${u.id}</td>
+                    <td class="px-6 py-4">
+                        <button onclick="togglePinUser(${u.id})" class="text-xl ${u.is_pinned ? 'text-yellow-400' : 'text-gray-600 hover:text-yellow-400'} transition" title="Закрепить/Открепить">★</button>
+                    </td>
                     <td class="px-6 py-4">
                         <div class="font-bold text-white">${escapeHTML(u.display_name || 'Без имени')}</div>
                         <div class="text-xs text-gray-500">${escapeHTML(u.email || 'Email не указан')}</div>

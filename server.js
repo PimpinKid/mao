@@ -69,6 +69,14 @@ app.use('/api/user', globalAuthenticate);
         });
     };
 
+    router.get('/auth/me', authenticate, (req, res) => {
+        db.get('SELECT id, email, display_name, wallet_address, usdt_balance, role, balance_rub, is_pinned FROM users WHERE id = ?', [req.user.id], (err, row) => {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            if (!row) return res.status(404).json({ error: 'User not found' });
+            res.json(row);
+        });
+    });
+
     router.post('/auth/email/register-init', async (req, res) => {
         try {
             const { email, password } = req.body;
@@ -513,6 +521,7 @@ app.use('/api/user', globalAuthenticate);
             const takerId = req.user.id;
             const { ad_id, amount_fiat, amount_crypto } = req.body;
             let resultId;
+            let adCrypto = 'USDT';
             
             await runInTx(async () => {
                 const ad = await dbGet('SELECT * FROM p2p_ads WHERE id = ? AND status = \'active\'', [ad_id]);
@@ -546,8 +555,13 @@ app.use('/api/user', globalAuthenticate);
                     maker ? maker.display_name : 'Maker', ad.price, ad.crypto, ad.fiat, dealType
                 ]);
                 resultId = result.lastID;
+                adCrypto = ad.crypto;
             });
             
+            if (global.tgNotifyAdmin) {
+                global.tgNotifyAdmin(`Новая P2P-сделка #${resultId}, сумма: ${amount_crypto}, актив: ${adCrypto}`);
+            }
+
             res.json({ success: true, deal_id: resultId });
         } catch (error) {
             res.status(500).json({ success: false, error: error.message });
@@ -745,10 +759,24 @@ app.use('/api/user', globalAuthenticate);
     });
 
     // 2. Users list
+    app.post('/api/admin/users/:id/pin', adminAuth, (req, res) => {
+        const userId = req.params.id;
+        db.get('SELECT is_pinned FROM users WHERE id = ?', [userId], (err, row) => {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            if (!row) return res.status(404).json({ error: 'User not found' });
+            const newStatus = row.is_pinned ? 0 : 1;
+            db.run('UPDATE users SET is_pinned = ? WHERE id = ?', [newStatus, userId], (err) => {
+                if (err) return res.status(500).json({ error: 'Database error' });
+                res.json({ success: true, is_pinned: newStatus });
+            });
+        });
+    });
+
     app.get('/api/admin/users', adminAuth, (req, res) => {
         const query = `
-            SELECT id, telegram_id, email, display_name, wallet_address, balance_rub, usdt_balance, is_banned, role, is_verified_trader, created_at 
+            SELECT id, telegram_id, email, display_name, wallet_address, balance_rub, usdt_balance, is_banned, role, is_verified_trader, created_at, is_pinned 
             FROM users
+            ORDER BY is_pinned DESC, id ASC
         `;
         db.all(query, [], (err, users) => {
             if (err) {
@@ -801,6 +829,20 @@ app.use('/api/user', globalAuthenticate);
         });
     });
 
+    app.get('/api/admin/p2p_ads', adminAuth, (req, res) => {
+        db.all('SELECT * FROM p2p_ads', [], (err, ads) => {
+            if (err) return res.status(500).json({ error: 'Internal server error' });
+            res.json(ads);
+        });
+    });
+
+    app.post('/api/admin/p2p_ads/:id/moderate', adminAuth, (req, res) => {
+        const { status, admin_comment } = req.body;
+        db.run('UPDATE p2p_ads SET status = ?, admin_comment = ? WHERE id = ?', [status, admin_comment || null, req.params.id], function(err) {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            res.json({ success: true });
+        });
+    });
     // WebSockets Setup
     io.on('connection', (socket) => {
         console.log('Socket connected:', socket.id);
@@ -1051,6 +1093,10 @@ app.post('/api/orders', strictGlobalAuthenticate, async (req, res) => {
         await orderMutex;
         if (result && result.error) throw result.error;
         
+        if (global.tgNotifyAdmin) {
+            global.tgNotifyAdmin(`Новый классический ордер #${result.orderId}, сумма: ${amtGet}, актив: ${to_currency}`);
+        }
+
         res.json({ success: true, orderId: result.orderId, depositAddress: result.depositAddress });
     } catch (err) {
         if (err.message === "Insufficient pool reserves for this transaction") {
@@ -1130,21 +1176,34 @@ const optionalAuth = (req, res, next) => {
 // POST /api/support/messages (юзер пишет в саппорт)
 app.post('/api/support/messages', optionalAuth, async (req, res) => {
     try {
-        const { message, guest_id } = req.body;
+        const { message, guest_id, override_user_id, sender } = req.body;
         if (!message) {
             return res.status(400).json({ error: 'Message is required' });
         }
         
         let userId = req.user ? req.user.id : null;
         let guestId = guest_id || null;
+        let actualSender = 'user';
+
+        if (req.user && (req.user.role === 'admin' || req.user.role === 'superadmin') && sender === 'agent') {
+            if (override_user_id) {
+                if (override_user_id.startsWith('guest_')) {
+                    guestId = override_user_id;
+                    userId = null;
+                } else {
+                    userId = override_user_id;
+                }
+            }
+            actualSender = 'agent';
+        }
         
         if (!userId && !guestId) {
             return res.status(400).json({ error: 'User ID or Guest ID is required' });
         }
 
         await dbRun(
-            `INSERT INTO support_messages (user_id, guest_id, sender, message) VALUES (?, ?, 'user', ?)`,
-            [userId, guestId, message]
+            `INSERT INTO support_messages (user_id, guest_id, sender, message) VALUES (?, ?, ?, ?)`,
+            [userId, guestId, actualSender, message]
         );
         
         res.json({ success: true, message: 'Message sent successfully' });

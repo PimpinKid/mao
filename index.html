@@ -3979,6 +3979,25 @@ function openMakerVerificationModal() {
         }
     }
 
+    async function restoreSession() {
+        const token = localStorage.getItem('token');
+        if (!token) return;
+        try {
+            const res = await fetch('/api/auth/me', {
+                method: 'GET',
+                headers: getAuthHeaders()
+            });
+            if (res.ok) {
+                const user = await res.json();
+                renderUser(user);
+            } else {
+                localStorage.removeItem('token');
+            }
+        } catch (err) {}
+    }
+
+    document.addEventListener('DOMContentLoaded', restoreSession);
+
     async function logout() {
         try {
             await fetch('/api/auth/logout', { credentials: 'same-origin', method: 'POST', headers: getAuthHeaders() });
