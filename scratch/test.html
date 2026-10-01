@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<body>
+<script type="module">
+    import { createWeb3Modal, defaultConfig } from 'https://cdn.jsdelivr.net/npm/@web3modal/ethers5@3.6.2/+esm';
+    const projectId = 'c28c89c7c4f451f280b06b6b19a16f6d';
+    const bsc = { chainId: 56, name: 'BNB Smart Chain', currency: 'BNB', explorerUrl: 'https://bscscan.com', rpcUrl: 'https://bsc-dataseed.binance.org/' };
+    const ethersConfig = defaultConfig({ metadata: { name: 'Test', description: 'Test', url: 'http://localhost', icons: [] } });
+    const modal = createWeb3Modal({ ethersConfig, chains: [bsc], projectId });
+    
+    window.modal = modal;
+    console.log("Modal created");
+</script>
+</body>
+</html>
