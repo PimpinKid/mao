@@ -165,7 +165,7 @@ app.use('/api/user', globalAuthenticate);
 
             if (!user) return res.status(401).json({ error: 'Invalid credentials' });
 
-            const valid = await bcrypt.compare(password, user.password_hash);
+            const valid = user.password_hash ? await bcrypt.compare(password, user.password_hash) : false;
             if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
 
             const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
@@ -290,7 +290,7 @@ app.use('/api/user', globalAuthenticate);
                 });
             });
             if (!user) return res.status(401).json({ error: 'Invalid credentials' });
-            const valid = await bcrypt.compare(password, user.password_hash);
+            const valid = user.password_hash ? await bcrypt.compare(password, user.password_hash) : false;
             if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
             const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
             const returnUser = await new Promise((resolve, reject) => {
