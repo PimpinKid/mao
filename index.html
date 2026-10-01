@@ -3769,7 +3769,7 @@ function openMakerVerificationModal() {
                         statTitle = currentLang === 'en' ? 'Cancelled' : 'Отменено';
                     }
                     
-                    const orderDate = new Date(order.created_at + 'Z');
+                    const orderDate = new Date(order.created_at.replace(' ', 'T') + 'Z');
                     const now = new Date();
                     const diffMs = Math.max(0, now - orderDate);
                     const diffMins = Math.floor(diffMs / 60000);
