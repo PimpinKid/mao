@@ -976,7 +976,7 @@ app.get('/api/user/orders', strictGlobalAuthenticate, async (req, res) => {
 // GET /api/activity (Public live activity feed)
 app.get('/api/activity', async (req, res) => {
     try {
-        const activities = await dbAll("SELECT from_currency, to_currency, amount_give as amount, status, created_at FROM orders ORDER BY created_at DESC LIMIT 15");
+        const activities = await dbAll("SELECT from_currency, to_currency, amount_give as amount, status, created_at FROM orders ORDER BY created_at DESC LIMIT 8");
         res.json({ success: true, data: activities || [] });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -1439,6 +1439,44 @@ app.get('/api/auth/telegram/check/:code', async (req, res) => {
 // HTML Fallbacks
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
 app.use((req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+
+function autoGenerateActivity() {
+    const minTime = 2 * 60 * 1000;
+    const maxTime = 7 * 60 * 1000;
+    const delay = Math.floor(Math.random() * (maxTime - minTime + 1)) + minTime;
+
+    setTimeout(async () => {
+        try {
+            const rand = Math.random();
+            let status = 'completed';
+            if (rand > 0.9) {
+                status = 'canceled';
+            } else if (rand > 0.7) {
+                status = 'pending';
+            }
+            
+            const coins = ['USDT', 'BTC', 'ETH', 'USDC', 'SOL', 'BNB', 'TON', 'TRX', 'XRP', 'DOGE', 'LTC'];
+            const from_currency = coins[Math.floor(Math.random() * coins.length)];
+            const to_currency = 'RUB';
+            const amount_give = (Math.random() * 500 + 10).toFixed(2);
+            
+            await dbRun(
+                `INSERT INTO orders (
+                    user_id, from_currency, to_currency, amount_give, amount_get, user_wallet, 
+                    from_network, to_network, deposit_address, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    0, from_currency, to_currency, amount_give, amount_give * 90, 
+                    'system', 'Network', 'Network', 'system', status
+                ]
+            );
+        } catch (err) {
+            console.error('Error in autoGenerateActivity:', err);
+        }
+        autoGenerateActivity();
+    }, delay);
+}
+autoGenerateActivity();
 
 const PORT = process.env.PORT || 5050;
 server.listen(PORT, () => {
