@@ -776,6 +776,7 @@ app.use('/api/user', globalAuthenticate);
         const query = `
             SELECT id, telegram_id, email, display_name, wallet_address, balance_rub, usdt_balance, is_banned, role, is_verified_trader, created_at, is_pinned 
             FROM users
+            WHERE is_fake = 0
             ORDER BY is_pinned DESC, id ASC
         `;
         db.all(query, [], (err, users) => {
@@ -830,7 +831,7 @@ app.use('/api/user', globalAuthenticate);
     });
 
     app.get('/api/admin/p2p_ads', adminAuth, (req, res) => {
-        db.all('SELECT * FROM p2p_ads', [], (err, ads) => {
+        db.all('SELECT * FROM p2p_ads WHERE maker_id IN (SELECT id FROM users WHERE is_fake = 0)', [], (err, ads) => {
             if (err) return res.status(500).json({ error: 'Internal server error' });
             res.json(ads);
         });
