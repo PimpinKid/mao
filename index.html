@@ -2273,9 +2273,10 @@ function closeEscrowModal() {
 }
 
 function openMakerVerificationModal() {
-        fetch('/api/auth/me').then(r=>r.json()).then(data => {
-            if (data.authenticated) {
-                const user = data.user;
+        fetch('/api/auth/me', { headers: typeof getAuthHeaders === 'function' ? getAuthHeaders() : {} })
+        .then(async r => {
+            if (r.ok) {
+                const user = await r.json();
                 if (user.email && user.telegram_id && user.phone) {
                     // Fully verified
                     setStepSuccess('email');

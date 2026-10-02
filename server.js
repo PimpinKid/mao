@@ -70,7 +70,7 @@ app.use('/api/user', globalAuthenticate);
     };
 
     router.get('/auth/me', authenticate, (req, res) => {
-        db.get('SELECT id, email, display_name, wallet_address, usdt_balance, role, balance_rub, is_pinned FROM users WHERE id = ?', [req.user.id], (err, row) => {
+        db.get('SELECT id, email, display_name, wallet_address, usdt_balance, role, balance_rub, is_pinned, telegram_id, phone, is_verified_trader, telegram_username FROM users WHERE id = ?', [req.user.id], (err, row) => {
             if (err) return res.status(500).json({ error: 'Database error' });
             if (!row) return res.status(404).json({ error: 'User not found' });
             res.json(row);
