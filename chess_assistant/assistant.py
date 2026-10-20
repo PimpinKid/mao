@@ -52,7 +52,7 @@ class ChessAssistantApp:
 
         self.auto_scan = False
         self.running = True
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
 
         # Initial reference snapshot
         try:

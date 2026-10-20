@@ -18,7 +18,7 @@ def get_local_ip():
 
 class ChessStateHolder:
     def __init__(self):
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.state = {
             "fen": chess.STARTING_FEN,
             "player_color": "white",
