@@ -230,6 +230,18 @@ class ChessAssistantApp:
             else:
                 print(f"{C_RED}[!] Ни один ход не был загружен.{C_RESET}")
 
+    def calibrate_in_app(self):
+        with self.lock:
+            from calibrate import calibrate_interactive
+            calibrate_interactive()
+            self.config = load_config()
+            self.player_color = self.config.get("player_color", "white").lower()
+            self.vision.update_config(self.config["board_bbox"], self.player_color)
+            self.board.reset()
+            self.vision.force_update_reference()
+            print(f"{C_GREEN}[+] Калибровка завершена! Доска сброшена на старт.{C_RESET}")
+            self.analyze_current_position("Новая калибровка")
+
     def run_cli(self):
         # Start auto-scan thread
         scan_thread = threading.Thread(target=self.auto_scan_loop, daemon=True)
@@ -241,7 +253,8 @@ class ChessAssistantApp:
         print("Горячие команды терминала:")
         print("  [Enter] / h      - Получить подсказку / обновить позицию")
         print("  auto on / off    - Включить / выключить авто-сканирование экрана")
-        print("  moves <ходы>     - Синхронизировать партию (e4 c5 a4 Nc6...)")
+        print("  cal              - Откалибровать доску (если открыли Chess.com)")
+        print("  moves <ходы>     - Синхронизировать партию (e4 e5 Nf3...)")
         print("  sync             - Перекалибровать опорный снимок доски")
         print("  flip             - Сменить цвет (Белые <-> Черные)")
         print("  m <ход>          - Ввести 1 ход вручную (например: m e2e4)")
@@ -264,6 +277,8 @@ class ChessAssistantApp:
                 elif cmd == "auto off":
                     self.auto_scan = False
                     print(f"{C_YELLOW}[+] Авто-сканирование экрана ВЫКЛЮЧЕНО.{C_RESET}")
+                elif cmd == "cal" or cmd == "calibrate":
+                    self.calibrate_in_app()
                 elif cmd.startswith("moves ") or cmd.startswith("pgn "):
                     parts = cmd.split(" ", 1)
                     if len(parts) > 1:
