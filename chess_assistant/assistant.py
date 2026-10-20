@@ -68,10 +68,25 @@ class ChessAssistantApp:
         if not analysis:
             return
 
+        move_num = (len(self.board.move_stack) // 2) + 1
+        turn_str = "БЕЛЫЕ" if self.board.turn == chess.WHITE else "ЧЕРНЫЕ"
+        
+        # Recent moves history
+        recent = []
+        for i, m in enumerate(self.board.move_stack[-6:]):
+            idx = len(self.board.move_stack) - 6 + i
+            m_num = (idx // 2) + 1
+            if idx % 2 == 0:
+                recent.append(f"{m_num}.{m.uci()}")
+            else:
+                recent.append(f"{m.uci()}")
+        history_str = " ".join(recent) if recent else "Стартовая позиция"
+
         print("\n" + "═" * 60)
         if trigger_reason:
             print(f"[*] Событие: {trigger_reason}")
-        print(f"[*] Чей ход: {'БЕЛЫЕ' if self.board.turn == chess.WHITE else 'ЧЕРНЫЕ'}")
+        print(f"[*] Позиция в памяти: {C_BOLD}Ход {move_num} ({turn_str}){C_RESET}")
+        print(f"[*] История ходов: {history_str}")
         print(f"┌────────────────────────────────────────────────────────┐")
         print(f"│ {C_BOLD}ЛУЧШИЙ ХОД:{C_RESET}  {C_GREEN}{C_BOLD}{analysis['best_move_san']:<8}{C_RESET} ({analysis['best_move_uci']})")
         print(f"│ {C_BOLD}ОЦЕНКА:{C_RESET}      {C_YELLOW}{analysis['score_str']:<8}{C_RESET} (Глубина: {analysis['depth']})")
@@ -176,6 +191,45 @@ class ChessAssistantApp:
             print(f"{C_CYAN}[+] Цвет игрока изменен на: {self.player_color.upper()}{C_RESET}")
             self.analyze_current_position("Смена цвета игрока")
 
+    def load_moves(self, text: str):
+        with self.lock:
+            import re
+            # Remove move numbers like '1.', '2.', '1.e4'
+            cleaned = re.sub(r'\d+\.+', ' ', text)
+            tokens = cleaned.strip().split()
+            new_board = chess.Board()
+            success_count = 0
+            for tok in tokens:
+                tok = tok.strip().strip(",.;")
+                if not tok:
+                    continue
+                try:
+                    # Try SAN notation first (e4, c5, Nf3, Bb5)
+                    move = new_board.parse_san(tok)
+                    new_board.push(move)
+                    success_count += 1
+                except Exception:
+                    try:
+                        # Try UCI notation (e2e4, g1f3)
+                        move = chess.Move.from_uci(tok)
+                        if move in new_board.legal_moves:
+                            new_board.push(move)
+                            success_count += 1
+                        else:
+                            print(f"{C_RED}[!] Не удалось распознать ход: {tok}{C_RESET}")
+                            break
+                    except Exception:
+                        print(f"{C_RED}[!] Не удалось распознать ход: {tok}{C_RESET}")
+                        break
+
+            if success_count > 0:
+                self.board = new_board
+                self.vision.force_update_reference()
+                print(f"{C_GREEN}[+] Успешно загружено ходов: {success_count}. Позиция синхронизирована!{C_RESET}")
+                self.analyze_current_position(f"Загрузка {success_count} ходов")
+            else:
+                print(f"{C_RED}[!] Ни один ход не был загружен.{C_RESET}")
+
     def run_cli(self):
         # Start auto-scan thread
         scan_thread = threading.Thread(target=self.auto_scan_loop, daemon=True)
@@ -187,11 +241,12 @@ class ChessAssistantApp:
         print("Горячие команды терминала:")
         print("  [Enter] / h      - Получить подсказку / обновить позицию")
         print("  auto on / off    - Включить / выключить авто-сканирование экрана")
+        print("  moves <ходы>     - Синхронизировать партию (e4 c5 a4 Nc6...)")
         print("  sync             - Перекалибровать опорный снимок доски")
         print("  flip             - Сменить цвет (Белые <-> Черные)")
-        print("  m <ход>          - Ввести ход вручную (например: m e2e4)")
+        print("  m <ход>          - Ввести 1 ход вручную (например: m e2e4)")
         print("  u                - Отменить последний ход")
-        print("  new / reset      - Начать новую партию")
+        print("  new / reset      - Начать новую партию с 1-го хода")
         print("  q                - Выход")
         print("=" * 60)
 
@@ -209,6 +264,10 @@ class ChessAssistantApp:
                 elif cmd == "auto off":
                     self.auto_scan = False
                     print(f"{C_YELLOW}[+] Авто-сканирование экрана ВЫКЛЮЧЕНО.{C_RESET}")
+                elif cmd.startswith("moves ") or cmd.startswith("pgn "):
+                    parts = cmd.split(" ", 1)
+                    if len(parts) > 1:
+                        self.load_moves(parts[1])
                 elif cmd == "sync":
                     self.vision.force_update_reference()
                     print(f"{C_GREEN}[+] Опорный снимок доски обновлен!{C_RESET}")
