@@ -82,13 +82,21 @@ class ChessAssistantApp:
                 recent.append(f"{m.uci()}")
         history_str = " ".join(recent) if recent else "Стартовая позиция"
 
+        is_my_turn = (self.board.turn == (chess.WHITE if self.player_color == "white" else chess.BLACK))
+
         print("\n" + "═" * 60)
         if trigger_reason:
             print(f"[*] Событие: {trigger_reason}")
         print(f"[*] Позиция в памяти: {C_BOLD}Ход {move_num} ({turn_str}){C_RESET}")
         print(f"[*] История ходов: {history_str}")
         print(f"┌────────────────────────────────────────────────────────┐")
-        print(f"│ {C_BOLD}ЛУЧШИЙ ХОД:{C_RESET}  {C_GREEN}{C_BOLD}{analysis['best_move_san']:<8}{C_RESET} ({analysis['best_move_uci']})")
+        if is_my_turn:
+            print(f"│ {C_BOLD}СТАТУС:{C_RESET}      {C_GREEN}{C_BOLD}ВАШ ХОД ({turn_str}){C_RESET}")
+            print(f"│ {C_BOLD}ЛУЧШИЙ ХОД:{C_RESET}  {C_GREEN}{C_BOLD}{analysis['best_move_san']:<8}{C_RESET} ({analysis['best_move_uci']})")
+        else:
+            print(f"│ {C_BOLD}СТАТУС:{C_RESET}      {C_YELLOW}ОЖИДАНИЕ ХОДА СОПЕРНИКА ({turn_str}){C_RESET}")
+            print(f"│ {C_BOLD}ОЖИДАЕТСЯ:{C_RESET}   {analysis['best_move_san']} ({analysis['best_move_uci']}) от соперника")
+
         print(f"│ {C_BOLD}ОЦЕНКА:{C_RESET}      {C_YELLOW}{analysis['score_str']:<8}{C_RESET} (Глубина: {analysis['depth']})")
         print(f"│ {C_BOLD}ИДЕЯ ХОДА:{C_RESET}   {analysis['explanation']}")
 

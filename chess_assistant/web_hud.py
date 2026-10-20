@@ -46,8 +46,11 @@ class ChessStateHolder:
             fen = self.state.get("fen", chess.STARTING_FEN)
             board = chess.Board(fen)
             arrows = []
+            is_my_turn = self.state.get("is_my_turn", True)
             best_uci = self.state.get("best_move_uci")
-            if best_uci and len(best_uci) >= 4:
+            
+            # Only draw the recommendation arrow when it is the player's turn!
+            if is_my_turn and best_uci and len(best_uci) >= 4:
                 try:
                     m = chess.Move.from_uci(best_uci)
                     arrows.append(chess.svg.Arrow(m.from_square, m.to_square, color="#22c55e"))
@@ -74,11 +77,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     body { background: var(--bg); color: var(--text); padding: 16px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
     .header { width: 100%; max-width: 480px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-    .badge { background: #334155; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+    .badge { padding: 5px 12px; border-radius: 999px; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
     .badge.green { background: #166534; color: #bbf7d0; }
+    .badge.yellow { background: #854d0e; color: #fef08a; }
     .hud-card { width: 100%; max-width: 480px; background: var(--card); border-radius: 16px; padding: 18px; margin-bottom: 14px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); }
     .move-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
     .best-move { font-size: 32px; font-weight: 800; color: var(--accent); letter-spacing: -0.5px; }
+    .best-move.waiting { font-size: 22px; color: #94a3b8; }
     .eval-badge { font-size: 20px; font-weight: 700; background: #0f172a; padding: 6px 14px; border-radius: 10px; border: 1px solid #334155; }
     .explanation { font-size: 14px; color: var(--muted); line-height: 1.4; margin-top: 6px; }
     .board-container { width: 100%; max-width: 480px; display: flex; justify-content: center; background: var(--card); border-radius: 16px; padding: 12px; margin-bottom: 14px; }
@@ -90,13 +95,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <body>
   <div class="header">
     <div style="font-weight: 700; font-size: 16px;">♟ Chess Stealth HUD</div>
-    <div class="badge green" id="statusBadge">АКТИВЕН</div>
+    <div class="badge green" id="statusBadge">ВАШ ХОД</div>
   </div>
 
   <div class="hud-card">
     <div class="move-row">
       <div>
-        <div style="font-size: 12px; color: var(--muted); text-transform: uppercase;">Лучший ход</div>
+        <div style="font-size: 12px; color: var(--muted); text-transform: uppercase;" id="moveLabel">Лучший ход для вас</div>
         <div class="best-move" id="bestMove">-</div>
       </div>
       <div class="eval-badge" id="evalScore">+0.00</div>
@@ -115,16 +120,36 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         const res = await fetch('/api/state');
         if (res.ok) {
           const data = await res.json();
-          document.getElementById('bestMove').innerText = data.best_move_san || data.best_move_uci || 'Ожидание';
-          document.getElementById('evalScore').innerText = data.score_str || '0.00';
-          document.getElementById('explanationText').innerText = data.explanation || '';
-          
-          if (data.lines && data.lines.length > 1) {
-            const alts = data.lines.slice(1).map(l => `<span class="alt-item">${l.move_san} (${l.score})</span>`).join('');
-            document.getElementById('altMoves').innerHTML = 'Варианты: ' + alts;
+          const badge = document.getElementById('statusBadge');
+          const moveLabel = document.getElementById('moveLabel');
+          const bestMove = document.getElementById('bestMove');
+
+          if (data.is_my_turn) {
+            badge.className = 'badge green';
+            badge.innerText = 'ВАШ ХОД (' + data.player_color.toUpperCase() + ')';
+            moveLabel.innerText = 'ЛУЧШИЙ ХОД ДЛЯ ВАС';
+            bestMove.className = 'best-move';
+            bestMove.innerText = data.best_move_san || data.best_move_uci || 'Ожидание';
+            document.getElementById('explanationText').innerText = data.explanation || '';
+            
+            if (data.lines && data.lines.length > 1) {
+              const alts = data.lines.slice(1).map(l => `<span class="alt-item">${l.move_san} (${l.score})</span>`).join('');
+              document.getElementById('altMoves').innerHTML = 'Варианты: ' + alts;
+            } else {
+              document.getElementById('altMoves').innerHTML = '';
+            }
           } else {
+            const oppColor = (data.player_color === 'white') ? 'ЧЕРНЫХ' : 'БЕЛЫХ';
+            badge.className = 'badge yellow';
+            badge.innerText = 'ХОД СОПЕРНИКА (' + oppColor + ')';
+            moveLabel.innerText = 'СТАТУС';
+            bestMove.className = 'best-move waiting';
+            bestMove.innerText = '⏳ Ожидание хода ' + oppColor;
+            document.getElementById('explanationText').innerText = 'Соперник думает. Ожидайте ход на доске...';
             document.getElementById('altMoves').innerHTML = '';
           }
+
+          document.getElementById('evalScore').innerText = data.score_str || '0.00';
         }
 
         const svgRes = await fetch('/api/board.svg');

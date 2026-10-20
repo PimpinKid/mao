@@ -81,7 +81,7 @@ class BoardVision:
         """Save the initial reference state of all 64 squares."""
         self.last_square_images = self.get_square_crops(board_img)
 
-    def detect_move(self, board: chess.Board, threshold: float = 12.0):
+    def detect_move(self, board: chess.Board, threshold: float = 18.0):
         """
         Compares current screen with the last reference snapshot.
         Evaluates legal moves in `board.legal_moves` and selects the move

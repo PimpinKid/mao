@@ -1,8 +1,8 @@
 {
   "stockfish_path": "/opt/homebrew/bin/stockfish",
   "board_bbox": {
-    "left": 227,
-    "top": 160,
+    "left": 228,
+    "top": 157,
     "width": 676,
     "height": 676
   },
