@@ -37,10 +37,10 @@ class ChessAssistantApp:
         bbox = self.config.get("board_bbox", {})
         self.vision = BoardVision(bbox, self.player_color)
 
-        # Web HUD init (stealth mode for phone)
+        # Web HUD init (interactive remote for phone)
         self.state_holder = ChessStateHolder()
         port = self.config.get("web_hud_port", 8765)
-        self.web_server = WebHudServer(self.state_holder, port)
+        self.web_server = WebHudServer(self.state_holder, port, action_callback=self._handle_hud_action)
         try:
             self.web_server.start()
             urls = self.web_server.get_urls()
@@ -111,21 +111,22 @@ class ChessAssistantApp:
         print(f"└────────────────────────────────────────────────────────┘")
         print("═" * 60)
 
-    def analyze_current_position(self, reason: str = "Запрос по Enter"):
+    def analyze_current_position(self, reason: str = "", scan_screen: bool = False):
         with self.lock:
-            # 1. Directly scan screen and synchronize exact board state!
-            synced_board, bottom_player, success = self.vision.sync_board_state(self.board)
-            if success:
-                self.board = synced_board
-                reason = "Доска мгновенно синхронизирована со снимка экрана"
+            # Only scan screen if explicitly requested (e.g. Enter key)
+            if scan_screen:
+                synced_board, bottom_player, success = self.vision.sync_board_state(self.board)
+                if success:
+                    self.board = synced_board
+                    reason = "Доска мгновенно синхронизирована со снимка экрана"
 
-            # Auto-update player perspective if bottom player changed (White <-> Black)
-            if bottom_player != self.player_color:
-                self.player_color = bottom_player
-                self.config["player_color"] = bottom_player
-                self.vision.update_config(self.config["board_bbox"], self.player_color)
+                # Auto-update player perspective if bottom player changed (White <-> Black)
+                if bottom_player != self.player_color:
+                    self.player_color = bottom_player
+                    self.config["player_color"] = bottom_player
+                    self.vision.update_config(self.config["board_bbox"], self.player_color)
 
-            # 2. Evaluate with Stockfish for the current board
+            # Evaluate with Stockfish for the current board
             analysis = self.engine.evaluate(
                 self.board,
                 time_limit=self.config.get("engine_time", 0.25),
@@ -177,6 +178,82 @@ class ChessAssistantApp:
                             self._update_hud(analysis)
             time.sleep(0.5)
 
+    def _on_browser_sync(self, data: dict):
+        """Receive board updates directly from Chess.com browser extension / userscript."""
+        with self.lock:
+            try:
+                player_color = data.get("player_color")
+                if player_color and player_color.lower() != self.player_color:
+                    self.player_color = player_color.lower()
+                    self.config["player_color"] = self.player_color
+                    self.vision.update_config(self.config["board_bbox"], self.player_color)
+
+                moves_str = data.get("moves")
+                fen = data.get("fen")
+
+                new_board = None
+                if moves_str:
+                    b_temp = chess.Board()
+                    tokens = [t.strip().strip(",.;") for t in moves_str.strip().split()]
+                    for tok in tokens:
+                        if not tok or tok[0].isdigit() and tok.endswith('.'):
+                            continue
+                        try:
+                            m = b_temp.parse_san(tok)
+                            b_temp.push(m)
+                        except Exception:
+                            try:
+                                m = chess.Move.from_uci(tok)
+                                if m in b_temp.legal_moves:
+                                    b_temp.push(m)
+                            except Exception:
+                                pass
+                    new_board = b_temp
+                elif fen:
+                    new_board = chess.Board(fen)
+
+                if new_board and new_board.board_fen() != self.board.board_fen():
+                    self.board = new_board
+                    self.vision.force_update_reference()
+                    analysis = self.engine.evaluate(
+                        self.board,
+                        time_limit=self.config.get("engine_time", 0.25),
+                        depth=self.config.get("engine_depth", 18),
+                        multipv=self.config.get("multipv", 3)
+                    )
+                    self.print_hint(analysis, trigger_reason="Браузерная синхронизация (Chess.com)")
+                    self._update_hud(analysis)
+            except Exception:
+                pass
+
+    def _handle_hud_action(self, action: str, payload: dict) -> dict:
+        """Processes user actions dispatched from the Phone Web HUD."""
+        with self.lock:
+            if action == "move":
+                uci_str = payload.get("move", "").strip()
+                success = self.manual_move(uci_str)
+                return {"status": "ok" if success else "illegal"}
+            elif action == "apply_best":
+                state = self.state_holder.get_state()
+                best_uci = state.get("best_move_uci")
+                if best_uci:
+                    success = self.manual_move(best_uci)
+                    return {"status": "ok" if success else "failed"}
+                return {"status": "no_best_move"}
+            elif action == "undo":
+                self.undo_move()
+                return {"status": "ok"}
+            elif action == "reset":
+                self.reset_game()
+                return {"status": "ok"}
+            elif action == "flip":
+                self.flip_color()
+                return {"status": "ok"}
+            elif action == "sync_fen":
+                self._on_browser_sync(payload)
+                return {"status": "ok"}
+            return {"status": "unknown_action"}
+
     def reset_game(self):
         with self.lock:
             self.board.reset()
@@ -194,19 +271,42 @@ class ChessAssistantApp:
             else:
                 print("[!] Стек ходов пуст.")
 
-    def manual_move(self, uci_str: str):
+    def manual_move(self, uci_str: str) -> bool:
         with self.lock:
             try:
-                move = chess.Move.from_uci(uci_str)
-                if move in self.board.legal_moves:
+                move = None
+                # 1. Try direct UCI (e.g. e2e4)
+                try:
+                    m = chess.Move.from_uci(uci_str)
+                    if m in self.board.legal_moves:
+                        move = m
+                    else:
+                        # Auto-promote pawn to Queen (e.g. e7e8 -> e7e8q)
+                        promo = chess.Move.from_uci(f"{uci_str}q")
+                        if promo in self.board.legal_moves:
+                            move = promo
+                except Exception:
+                    pass
+
+                # 2. Try SAN notation (e.g. e4, Nf3, exd5)
+                if not move:
+                    try:
+                        move = self.board.parse_san(uci_str)
+                    except Exception:
+                        pass
+
+                if move and move in self.board.legal_moves:
                     self.board.push(move)
                     self.vision.force_update_reference()
-                    print(f"{C_GREEN}[+] Ход {uci_str} применен.{C_RESET}")
-                    self.analyze_current_position(f"Ручной ввод хода: {uci_str}")
+                    print(f"{C_GREEN}[+] Ход {move.uci()} применен.{C_RESET}")
+                    self.analyze_current_position(f"Ход: {move.uci()}")
+                    return True
                 else:
                     print(f"{C_RED}[!] Нелегальный ход: {uci_str}{C_RESET}")
+                    return False
             except Exception as e:
                 print(f"{C_RED}[!] Ошибка хода: {e}{C_RESET}")
+                return False
 
     def flip_color(self):
         with self.lock:
@@ -278,12 +378,18 @@ class ChessAssistantApp:
         print("=" * 60)
         print("Горячие команды терминала:")
         print("  [Enter]          - СКАН ЭКРАНА И ЛУЧШИЙ ХОД (для игрока снизу)")
+        print("  next / n         - Применить рекомендованный ход (Следующий ход)")
+        print("  <ход>            - Сделать ход (например: e4, e5, Nf3, e7e5)")
+        print("  undo / u         - Отменить последний ход")
+        print("  flip             - Сменить цвет (Я за Белых <-> Черных)")
+        print("  new / reset      - Сброс на стартовую позицию")
         print("  auto on / off    - Включить / выключить авто-сканирование экрана")
         print("  cal              - Откалибровать доску под новое окно")
-        print("  moves <ходы>     - Ввести ходы вручную (если нужно)")
-        print("  flip             - Принудительно сменить цвет (Белые <-> Черные)")
-        print("  new / reset      - Сброс на стартовую позицию")
         print("  q                - Выход")
+        print("  ------------------------------------------------------------")
+        print("  📱 НА ТЕЛЕФОНЕ (Web-HUD):")
+        print("     - Тапайте по фигуре противника, чтобы сделать его ход!")
+        print("     - Нажимайте '⚡️ Сделать ход', чтобы применить свой ход!")
         print("=" * 60)
 
         # First evaluation of start position (instant, does not block startup)
@@ -295,7 +401,13 @@ class ChessAssistantApp:
             try:
                 cmd = input("\n[Chess] > ").strip()
                 if not cmd or cmd == "h":
-                    self.analyze_current_position("Запрос подсказки")
+                    self.analyze_current_position("Запрос по Enter (скан экрана)", scan_screen=True)
+                elif cmd == "next" or cmd == "n" or cmd == "best":
+                    best_uci = self.state_holder.get_state().get("best_move_uci")
+                    if best_uci:
+                        self.manual_move(best_uci)
+                    else:
+                        print("[!] Нет доступного хода.")
                 elif cmd == "auto on":
                     self.auto_scan = True
                     print(f"{C_GREEN}[+] Авто-сканирование экрана ВКЛЮЧЕНО (каждые 400мс).{C_RESET}")
@@ -326,7 +438,9 @@ class ChessAssistantApp:
                     print("[*] Завершение работы...")
                     break
                 else:
-                    print(f"[?] Неизвестная команда: {cmd}. Нажмите Enter для подсказки или 'q' для выхода.")
+                    # Attempt to parse direct move (e.g. 'e4', 'Nf3', 'e7e5')
+                    if not self.manual_move(cmd):
+                        print(f"[?] Неизвестная команда или нелегальный ход: {cmd}. Нажмите Enter для подсказки или 'q' для выхода.")
             except (KeyboardInterrupt, EOFError):
                 self.running = False
                 break

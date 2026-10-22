@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Chess.com Stealth Assistant Bridge",
+  "version": "1.0.0",
+  "description": "Silent bridge from Chess.com to local Stockfish Assistant and Web HUD",
+  "host_permissions": [
+    "*://*.chess.com/*",
+    "http://localhost:8765/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.chess.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
