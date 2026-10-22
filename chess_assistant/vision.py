@@ -260,7 +260,7 @@ class BoardVision:
                     c += 1
             return c
 
-        def search_from(start_b, limit_depth):
+        def search_from(start_b, limit_depth, max_nodes=300):
             pq = []
             init_diff = diff_count(start_b)
             if init_diff == 0:
@@ -268,8 +268,9 @@ class BoardVision:
             cnt = 0
             heapq.heappush(pq, (init_diff, 0, cnt, start_b))
             visited = set()
+            nodes = 0
 
-            while pq:
+            while pq and nodes < max_nodes:
                 h, d, _, bd = heapq.heappop(pq)
                 if h == 0:
                     return bd
@@ -279,6 +280,7 @@ class BoardVision:
                 if fen_key in visited:
                     continue
                 visited.add(fen_key)
+                nodes += 1
 
                 for m in bd.legal_moves:
                     nb = bd.copy()
@@ -289,15 +291,27 @@ class BoardVision:
                         heapq.heappush(pq, (cur_diff, d + 1, cnt, nb))
             return None
 
-        # 1. Search forward from current_board (fastest: depth 1..4)
+        # 1. Search forward from current_board (fastest: depth 1..2, max 300 nodes)
         if current_board is not None:
-            res = search_from(current_board, limit_depth=4)
+            res = search_from(current_board, limit_depth=2, max_nodes=300)
             if res:
                 self.initialize_reference(board_img)
                 return res, bottom_player, True
 
-        # 2. Search from standard initial board (up to depth max_depth)
-        res = search_from(chess.Board(), limit_depth=max_depth)
+        # 2. Try depth 3 from current_board
+        if current_board is not None:
+            res = search_from(current_board, limit_depth=3, max_nodes=300)
+            if res:
+                self.initialize_reference(board_img)
+                return res, bottom_player, True
+
+        # 3. Direct check of standard initial board
+        if diff_count(chess.Board()) == 0:
+            self.initialize_reference(board_img)
+            return chess.Board(), bottom_player, True
+
+        # 4. Search from standard initial board (limit depth 2, max 300 nodes)
+        res = search_from(chess.Board(), limit_depth=2, max_nodes=300)
         if res:
             self.initialize_reference(board_img)
             return res, bottom_player, True

@@ -282,8 +282,10 @@ class ChessAssistantApp:
         print("  q                - Выход")
         print("=" * 60)
 
-        # First evaluation
-        self.analyze_current_position("Старт партии")
+        # First evaluation of start position (instant, does not block startup)
+        init_analysis = self.engine.evaluate(self.board, time_limit=0.1, depth=10)
+        self.print_hint(init_analysis, trigger_reason="Готов к игре")
+        self._update_hud(init_analysis)
 
         while self.running:
             try:
