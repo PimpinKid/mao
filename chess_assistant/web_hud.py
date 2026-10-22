@@ -32,6 +32,7 @@ class ChessStateHolder:
             "depth": 0,
             "explanation": "Стартовая позиция. Сделайте первый ход!",
             "is_my_turn": True,
+            "mode": "legit",
             "lines": []
         }
 
@@ -121,6 +122,54 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     }
     .badge.green { background: #14532d; color: #86efac; border: 1px solid #166534; }
     .badge.yellow { background: #713f12; color: #fde047; border: 1px solid #854d0e; }
+
+    /* Mode Selector Bar */
+    .mode-container {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      width: 100%;
+    }
+    .btn-mode {
+      width: 100%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 800;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      letter-spacing: 0.3px;
+      user-select: none;
+    }
+    .btn-mode.legit {
+      background: rgba(14, 165, 233, 0.12);
+      border: 1.5px solid #0284c7;
+      color: #38bdf8;
+      box-shadow: 0 2px 10px rgba(2, 132, 199, 0.2);
+    }
+    .btn-mode.legit:active {
+      transform: scale(0.98);
+      background: rgba(14, 165, 233, 0.22);
+    }
+    .btn-mode.max {
+      background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(249, 115, 22, 0.2));
+      border: 1.5px solid #ef4444;
+      color: #fca5a5;
+      box-shadow: 0 2px 14px rgba(239, 68, 68, 0.25);
+    }
+    .btn-mode.max:active {
+      transform: scale(0.98);
+      background: linear-gradient(135deg, rgba(239, 68, 68, 0.3), rgba(249, 115, 22, 0.3));
+    }
+    .mode-subtext {
+      font-size: 11px;
+      color: var(--muted);
+      text-align: center;
+      line-height: 1.3;
+    }
 
     /* Move Card */
     .hud-card {
@@ -277,6 +326,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       <div class="badge green" id="statusBadge">ВАШ ХОД</div>
     </div>
 
+    <!-- Engine Mode Switcher -->
+    <div class="mode-container">
+      <button class="btn-mode legit" id="btnMode" onclick="toggleMode()">
+        <span id="modeTitle">🛡 ЛЕГИТ-РЕЖИМ (~70% ПОБЕД)</span>
+        <span style="font-size: 11px; opacity: 0.8; font-weight: 600;">[СМЕНИТЬ ⇄]</span>
+      </button>
+      <div class="mode-subtext" id="modeDesc">Защита от банов: естественная игра, Elo ~1450</div>
+    </div>
+
     <!-- Main Best Move HUD Card -->
     <div class="hud-card">
       <div class="move-row">
@@ -339,6 +397,21 @@ HTML_TEMPLATE = """<!DOCTYPE html>
           const btnMoveName = document.getElementById('btnMoveName');
           const btnColor = document.getElementById('btnColor');
           const boardHint = document.getElementById('boardHint');
+          const btnMode = document.getElementById('btnMode');
+          const modeTitle = document.getElementById('modeTitle');
+          const modeDesc = document.getElementById('modeDesc');
+
+          if (btnMode && modeTitle && modeDesc) {
+            if (data.mode === 'max') {
+              btnMode.className = 'btn-mode max';
+              modeTitle.innerText = '🔥 МАКСИМАЛЬНЫЙ СКИЛЛ (3500+)';
+              modeDesc.innerText = '⚡️ Полная мощность Stockfish: моментальный разгром';
+            } else {
+              btnMode.className = 'btn-mode legit';
+              modeTitle.innerText = '🛡 ЛЕГИТ-РЕЖИМ (~70% ПОБЕД)';
+              modeDesc.innerText = '🔒 Защита от банов: естественная игра, Elo ~1450';
+            }
+          }
 
           btnColor.innerText = (data.player_color === 'white') ? '⚪ Я за Белых' : '⚫ Я за Черных';
 
@@ -553,6 +626,22 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       }
     }
 
+    async function toggleMode() {
+      isRequestInProgress = true;
+      try {
+        const res = await fetch('/api/toggle_mode', { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          showToast(data.mode === 'max' ? '🔥 Режим: МАКСИМАЛЬНЫЙ СКИЛЛ' : '🛡 Режим: ЛЕГИТ (~70% побед)');
+        }
+      } catch (e) {
+        showToast('⚠️ Ошибка соединения');
+      } finally {
+        isRequestInProgress = false;
+        updateHUD();
+      }
+    }
+
     setInterval(updateHUD, 800);
     updateHUD();
   </script>
@@ -607,6 +696,12 @@ def make_handler(state_holder: ChessStateHolder, action_callback=None):
                 elif self.path == "/api/sync_fen":
                     if action_callback:
                         res_data = action_callback("sync_fen", payload)
+                elif self.path == "/api/toggle_mode":
+                    if action_callback:
+                        res_data = action_callback("toggle_mode", payload)
+                elif self.path == "/api/set_mode":
+                    if action_callback:
+                        res_data = action_callback("set_mode", payload)
                 else:
                     self.send_response(404)
                     self.end_headers()

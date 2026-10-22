@@ -6,9 +6,10 @@
     "width": 559,
     "height": 559
   },
-  "player_color": "white",
+  "player_color": "black",
   "engine_depth": 18,
   "engine_time": 0.2,
   "multipv": 3,
-  "web_hud_port": 8765
+  "web_hud_port": 8765,
+  "engine_mode": "max"
 }

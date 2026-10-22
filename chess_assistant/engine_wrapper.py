@@ -29,29 +29,98 @@ def to_russian_san(san_move: str) -> str:
     return res
 
 class ChessEngine:
-    def __init__(self, stockfish_path: str):
+    def __init__(self, stockfish_path: str, mode: str = "legit"):
         if not stockfish_path or not os.path.exists(stockfish_path):
             raise FileNotFoundError(f"Stockfish not found at path: {stockfish_path}")
         self.engine_path = stockfish_path
         self.engine = None
+        self.mode = mode.lower()
         self._start_engine()
 
     def _start_engine(self):
         try:
             self.engine = chess.engine.SimpleEngine.popen_uci(self.engine_path)
-            # Configure engine for high responsiveness
             self.engine.configure({"Threads": 2, "Hash": 64})
+            self.set_mode(self.mode)
         except Exception as e:
             raise RuntimeError(f"Failed to start Stockfish engine: {e}")
 
-    def evaluate(self, board: chess.Board, time_limit: float = 0.2, depth: int = 18, multipv: int = 3):
+    def set_mode(self, mode: str):
+        """Switches engine between 'max' (3500+ Elo) and 'legit' (~70% winrate humanized)."""
+        self.mode = mode.lower()
+        if self.engine:
+            try:
+                if self.mode == "max":
+                    self.engine.configure({
+                        "UCI_LimitStrength": False,
+                        "Skill Level": 20
+                    })
+                else:
+                    self.engine.configure({
+                        "UCI_LimitStrength": True,
+                        "UCI_Elo": 1450,
+                        "Skill Level": 7
+                    })
+            except Exception:
+                pass
+
+    def _select_legit_line(self, analysis: list):
         """
-        Analyze the current board state.
-        Returns:
-            dict containing best_move (uci and san), score_str, score_val, depth, multipv_lines, explanation
+        Picks a realistic human move targeting ~70% winrate:
+        - 60% top line
+        - 30% second line (if within reasonable tactical margin)
+        - 10% third line
+        """
+        import random
+        if not analysis:
+            return None
+        if len(analysis) == 1:
+            return analysis[0]
+
+        top_line = analysis[0]
+        top_score = top_line.get("score")
+        if not top_score:
+            return top_line
+
+        top_rel = top_score.relative
+        top_cp = 10000 if (top_rel.is_mate() and top_rel.mate() > 0) else (-10000 if (top_rel.is_mate() and top_rel.mate() < 0) else (top_rel.score() or 0))
+
+        candidates = [(0, top_line)]
+        for i in range(1, len(analysis)):
+            line = analysis[i]
+            s = line.get("score")
+            if not s:
+                continue
+            rel = s.relative
+            cp = 10000 if (rel.is_mate() and rel.mate() > 0) else (-10000 if (rel.is_mate() and rel.mate() < 0) else (rel.score() or 0))
+            # Don't pick a move that blunders more than 80 centipawns
+            if (top_cp - cp) <= 80:
+                candidates.append((i, line))
+
+        if len(candidates) <= 1:
+            return top_line
+
+        weights = [0.60, 0.30, 0.10][:len(candidates)]
+        w_sum = sum(weights)
+        weights = [w / w_sum for w in weights]
+        _, chosen = random.choices(candidates, weights=weights)[0]
+        return chosen
+
+    def evaluate(self, board: chess.Board, time_limit: float = None, depth: int = None, multipv: int = 3, mode: str = None):
+        """
+        Analyze the current board state in either 'max' or 'legit' mode.
         """
         if self.engine is None:
             self._start_engine()
+
+        eval_mode = (mode or self.mode).lower()
+        if eval_mode != self.mode:
+            self.set_mode(eval_mode)
+
+        if depth is None:
+            depth = 18 if eval_mode == "max" else 10
+        if time_limit is None:
+            time_limit = 0.25 if eval_mode == "max" else 0.15
 
         if board.is_game_over():
             return {
@@ -60,14 +129,14 @@ class ChessEngine:
                 "best_move_uci": None,
                 "best_move_san": None,
                 "score_str": "0.0",
+                "mode": eval_mode,
                 "explanation": f"Партия окончена: {board.result()}"
             }
 
         limit = chess.engine.Limit(time=time_limit, depth=depth)
         try:
             analysis = self.engine.analyse(board, limit=limit, multipv=multipv)
-        except Exception as e:
-            # Reconnect if crashed
+        except Exception:
             self._start_engine()
             analysis = self.engine.analyse(board, limit=limit, multipv=multipv)
 
@@ -75,7 +144,14 @@ class ChessEngine:
             return None
 
         primary = analysis[0]
-        pv = primary.get("pv", [])
+        if eval_mode == "legit" and len(analysis) > 1:
+            selected_line = self._select_legit_line(analysis)
+        else:
+            selected_line = primary
+
+        pv = selected_line.get("pv", [])
+        if not pv:
+            pv = primary.get("pv", [])
         if not pv:
             return None
 
@@ -139,6 +215,7 @@ class ChessEngine:
             "score_val": score_val,
             "depth": primary.get("depth", depth),
             "lines": lines,
+            "mode": eval_mode,
             "explanation": explanation
         }
 

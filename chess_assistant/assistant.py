@@ -21,6 +21,7 @@ class ChessAssistantApp:
     def __init__(self):
         self.config = load_config()
         self.player_color = self.config.get("player_color", "white").lower()
+        self.mode = self.config.get("engine_mode", "legit").lower()
         self.board = chess.Board()
 
         # Engine init
@@ -30,8 +31,9 @@ class ChessAssistantApp:
             print(f"{C_RED}[!] Ошибка: Stockfish не найден. Установите его: brew install stockfish{C_RESET}")
             sys.exit(1)
 
-        self.engine = ChessEngine(stockfish_path)
-        print(f"{C_GREEN}[+] Движок успешно запущен: {stockfish_path}{C_RESET}")
+        self.engine = ChessEngine(stockfish_path, mode=self.mode)
+        mode_label = "🔥 МАКСИМУМ" if self.mode == "max" else "🛡 ЛЕГИТ (~70% Win)"
+        print(f"{C_GREEN}[+] Движок запущен в режиме [{mode_label}]: {stockfish_path}{C_RESET}")
 
         # Vision init
         bbox = self.config.get("board_bbox", {})
@@ -89,6 +91,8 @@ class ChessAssistantApp:
         print("\n" + "═" * 60)
         if trigger_reason:
             print(f"[*] Событие:          {trigger_reason}")
+        mode_str = f"{C_RED}🔥 МАКСИМУМ (Stockfish 3500+){C_RESET}" if self.mode == "max" else f"{C_CYAN}🛡 ЛЕГИТ (Elo ~1450, ~70% Win){C_RESET}"
+        print(f"[*] Режим движка:     {mode_str}")
         print(f"[*] Игрок снизу (ВЫ): {C_CYAN}{C_BOLD}{bottom_str}{C_RESET} (определено со снимка)")
         print(f"[*] Чей сейчас ход:   {C_BOLD}{turn_str}{C_RESET} (Ход {move_num})")
         print(f"[*] История ходов:    {history_str}")
@@ -157,6 +161,7 @@ class ChessAssistantApp:
             depth=analysis.get("depth", 18),
             explanation=analysis.get("explanation", ""),
             lines=analysis.get("lines", []),
+            mode=self.mode,
             is_my_turn=is_my_turn
         )
 
@@ -249,6 +254,27 @@ class ChessAssistantApp:
             elif action == "flip":
                 self.flip_color()
                 return {"status": "ok"}
+            elif action == "toggle_mode":
+                self.mode = "max" if self.mode == "legit" else "legit"
+                self.engine.set_mode(self.mode)
+                self.config["engine_mode"] = self.mode
+                save_config(self.config)
+                mode_label = "🔥 МАКСИМАЛЬНЫЙ" if self.mode == "max" else "🛡 ЛЕГИТ (70% Win)"
+                print(f"\n{C_CYAN}[+] Режим игры переключен на: {mode_label}{C_RESET}")
+                self.analyze_current_position(f"Смена режима: {mode_label}", scan_screen=False)
+                return {"status": "ok", "mode": self.mode}
+            elif action == "set_mode":
+                target = payload.get("mode", "legit").lower()
+                if target in ["max", "legit"]:
+                    self.mode = target
+                    self.engine.set_mode(self.mode)
+                    self.config["engine_mode"] = self.mode
+                    save_config(self.config)
+                    mode_label = "🔥 МАКСИМАЛЬНЫЙ" if self.mode == "max" else "🛡 ЛЕГИТ (70% Win)"
+                    print(f"\n{C_CYAN}[+] Режим игры переключен на: {mode_label}{C_RESET}")
+                    self.analyze_current_position(f"Смена режима: {mode_label}", scan_screen=False)
+                    return {"status": "ok", "mode": self.mode}
+                return {"status": "invalid_mode"}
             elif action == "sync_fen":
                 self._on_browser_sync(payload)
                 return {"status": "ok"}
@@ -382,6 +408,8 @@ class ChessAssistantApp:
         print("  <ход>            - Сделать ход (например: e4, e5, Nf3, e7e5)")
         print("  undo / u         - Отменить последний ход")
         print("  flip             - Сменить цвет (Я за Белых <-> Черных)")
+        print("  mode legit/legit - Переключить на Легит-режим (~70% побед, Elo ~1450)")
+        print("  mode max / max   - Переключить на Максимальный скилл (Stockfish 3500+)")
         print("  new / reset      - Сброс на стартовую позицию")
         print("  auto on / off    - Включить / выключить авто-сканирование экрана")
         print("  cal              - Откалибровать доску под новое окно")
@@ -433,6 +461,23 @@ class ChessAssistantApp:
                     parts = cmd.split()
                     if len(parts) > 1:
                         self.manual_move(parts[1])
+                elif cmd == "mode max" or cmd == "max":
+                    self.mode = "max"
+                    self.engine.set_mode(self.mode)
+                    self.config["engine_mode"] = self.mode
+                    save_config(self.config)
+                    print(f"{C_RED}[+] Режим переключен: 🔥 МАКСИМАЛЬНЫЙ СКИЛЛ (Stockfish 3500+){C_RESET}")
+                    self.analyze_current_position("Смена режима: MAX", scan_screen=False)
+                elif cmd == "mode legit" or cmd == "legit":
+                    self.mode = "legit"
+                    self.engine.set_mode(self.mode)
+                    self.config["engine_mode"] = self.mode
+                    save_config(self.config)
+                    print(f"{C_CYAN}[+] Режим переключен: 🛡 ЛЕГИТ (Elo ~1450, ~70% побед){C_RESET}")
+                    self.analyze_current_position("Смена режима: LEGIT", scan_screen=False)
+                elif cmd == "mode":
+                    mode_label = "🔥 МАКСИМАЛЬНЫЙ СКИЛЛ" if self.mode == "max" else "🛡 ЛЕГИТ (Elo ~1450, ~70% побед)"
+                    print(f"[*] Текущий режим: {mode_label}")
                 elif cmd == "q" or cmd == "exit":
                     self.running = False
                     print("[*] Завершение работы...")
