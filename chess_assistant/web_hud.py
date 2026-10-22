@@ -168,27 +168,42 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </html>
 """
 
+import sys
+
+class SilentThreadingServer(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        exc_type, _, _ = sys.exc_info()
+        if exc_type and issubclass(exc_type, (BrokenPipeError, ConnectionResetError)):
+            return
+        super().handle_error(request, client_address)
+
 def make_handler(state_holder: ChessStateHolder):
     class CustomHandler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
-            if self.path == "/" or self.path == "/index.html":
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(HTML_TEMPLATE.encode("utf-8"))
-            elif self.path == "/api/state":
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps(state_holder.get_state()).encode("utf-8"))
-            elif self.path == "/api/board.svg":
-                self.send_response(200)
-                self.send_header("Content-Type", "image/svg+xml")
-                self.end_headers()
-                self.wfile.write(state_holder.get_svg_board().encode("utf-8"))
-            else:
-                self.send_response(404)
-                self.end_headers()
+            try:
+                if self.path == "/" or self.path == "/index.html":
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(HTML_TEMPLATE.encode("utf-8"))
+                elif self.path == "/api/state":
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps(state_holder.get_state()).encode("utf-8"))
+                elif self.path == "/api/board.svg":
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/svg+xml")
+                    self.end_headers()
+                    self.wfile.write(state_holder.get_svg_board().encode("utf-8"))
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
         def log_message(self, format, *args):
             # Suppress console clutter
@@ -205,9 +220,7 @@ class WebHudServer:
 
     def start(self):
         handler_class = make_handler(self.state_holder)
-        # Allow socket address reuse
-        socketserver.TCPServer.allow_reuse_address = True
-        self.server = socketserver.TCPServer(("0.0.0.0", self.port), handler_class)
+        self.server = SilentThreadingServer(("0.0.0.0", self.port), handler_class)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
 
