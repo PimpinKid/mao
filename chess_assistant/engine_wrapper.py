@@ -102,6 +102,19 @@ class ChessEngine:
         # Generate strategic explanation
         explanation = self._explain_move(board, best_move, ru_san, score_str)
 
+        # Anticipated reply move (pv[1])
+        reply_move_uci = None
+        reply_move_san = None
+        if len(pv) > 1:
+            try:
+                reply_move = pv[1]
+                reply_move_uci = reply_move.uci()
+                b_copy = board.copy()
+                b_copy.push(best_move)
+                reply_move_san = to_russian_san(b_copy.san(reply_move))
+            except Exception:
+                pass
+
         # Parse alternative moves (multipv)
         lines = []
         for line in analysis:
@@ -120,6 +133,8 @@ class ChessEngine:
             "game_over": False,
             "best_move_uci": best_move.uci(),
             "best_move_san": ru_san,
+            "reply_move_uci": reply_move_uci,
+            "reply_move_san": reply_move_san,
             "score_str": score_str,
             "score_val": score_val,
             "depth": primary.get("depth", depth),

@@ -99,6 +99,8 @@ class ChessAssistantApp:
         else:
             print(f"│ {C_BOLD}СТАТУС:{C_RESET}      {C_YELLOW}ОЖИДАНИЕ ХОДА СОПЕРНИКА ({turn_str}){C_RESET}")
             print(f"│ {C_BOLD}ОЖИДАЕТСЯ:{C_RESET}   {analysis['best_move_san']} ({analysis['best_move_uci']}) от соперника")
+            if analysis.get("reply_move_san"):
+                print(f"│ {C_BOLD}ВАШ ОТВЕТ:{C_RESET}   {C_GREEN}{C_BOLD}{analysis['reply_move_san']:<8}{C_RESET} ({analysis['reply_move_uci']}) (на этот ход соперника)")
 
         print(f"│ {C_BOLD}ОЦЕНКА:{C_RESET}      {C_YELLOW}{analysis['score_str']:<8}{C_RESET} (Глубина: {analysis['depth']})")
         print(f"│ {C_BOLD}ИДЕЯ ХОДА:{C_RESET}   {analysis['explanation']}")
@@ -147,6 +149,8 @@ class ChessAssistantApp:
             player_color=self.player_color,
             best_move_uci=analysis.get("best_move_uci"),
             best_move_san=analysis.get("best_move_san"),
+            reply_move_uci=analysis.get("reply_move_uci"),
+            reply_move_san=analysis.get("reply_move_san"),
             score_str=analysis.get("score_str", "+0.00"),
             score_val=analysis.get("score_val", 0.0),
             depth=analysis.get("depth", 18),

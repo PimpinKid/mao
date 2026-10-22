@@ -82,19 +82,47 @@ class BoardVision:
         self.last_square_images = self.get_square_crops(board_img)
 
     def is_cell_empty(self, crop: np.ndarray) -> bool:
-        """Determines if a square crop has NO chess piece in its central area."""
+        """
+        Determines if a square crop has NO chess piece in its central area.
+        Empty squares have completely flat texture (spatial std dev < 8.0).
+        """
+        if crop is None or crop.size == 0:
+            return True
+        h, w, _ = crop.shape
+        y1, y2 = int(h * 0.25), int(h * 0.75)
+        x1, x2 = int(w * 0.25), int(w * 0.75)
+        center = crop[y1:y2, x1:x2]
+        spatial_std = float(center.std(axis=(0, 1)).mean())
+        return spatial_std < 8.0
+
+    @staticmethod
+    def detect_square_occupancy(crop: np.ndarray) -> str:
+        """
+        Determines occupancy of a square: 'W' (White piece), 'B' (Black piece), or '.' (empty).
+        Works seamlessly across Discord ("Chess in the Park") and Chess.com boards.
+        """
+        if crop is None or crop.size == 0:
+            return '.'
         h, w, _ = crop.shape
         y1, y2 = int(h * 0.25), int(h * 0.75)
         x1, x2 = int(w * 0.25), int(w * 0.75)
         center = crop[y1:y2, x1:x2]
 
-        # Check dark border or dark piece pixels (RGB all < 85)
-        dark_ratio = np.mean(np.all(center < 85, axis=-1))
-        # Check white piece pixels (RGB all > 215)
-        white_ratio = np.mean(np.all(center > 215, axis=-1))
+        # Spatial std dev: empty cells have flat uniform texture (< 8.0)
+        spatial_std = float(center.std(axis=(0, 1)).mean())
+        if spatial_std < 8.0:
+            return '.'
 
-        # An empty square has zero piece pixels in its center
-        return (dark_ratio < 0.04 and white_ratio < 0.06)
+        # Calculate luminance for piece color classification
+        lum = 0.299 * center[:, :, 0] + 0.587 * center[:, :, 1] + 0.114 * center[:, :, 2]
+        mean_lum = float(lum.mean())
+        bright_ratio = float(np.mean(lum > 185))
+        dark_ratio = float(np.mean(lum < 105))
+
+        if mean_lum > 170.0 or bright_ratio > dark_ratio:
+            return 'W'
+        else:
+            return 'B'
 
     def detect_move(self, board: chess.Board, threshold: float = 18.0):
         """
@@ -201,24 +229,30 @@ class BoardVision:
         cell_w = w / 8.0
         cell_h = h / 8.0
 
-        # Step 1: Detect whether bottom row has White or Black pieces
-        bottom_white_score = 0
-        bottom_black_score = 0
-        for c in range(8):
-            b_crop = board_img[int(7*cell_h):int(8*cell_h), int(c*cell_w):int((c+1)*cell_w)]
-            corners = np.concatenate([b_crop[:4,:4], b_crop[:4,-4:], b_crop[-4:,:4], b_crop[-4:,-4:]], axis=0)
-            bg = np.median(corners, axis=(0,1))
-            center = b_crop[int(b_crop.shape[0]*0.2):int(b_crop.shape[0]*0.8), int(b_crop.shape[1]*0.2):int(b_crop.shape[1]*0.8)]
-            diff = np.abs(center.astype(np.float32) - bg).sum(axis=-1)
-            fg = (diff > 35)
-            if np.mean(fg) > 0.10:
-                bright = np.mean(center[fg])
-                if bright > 135:
-                    bottom_white_score += 1
-                else:
-                    bottom_black_score += 1
+        # Step 1: Detect bottom player orientation by checking pieces on bottom 2 ranks (rows 6, 7) vs top 2 ranks (rows 0, 1)
+        bottom_white, bottom_black = 0, 0
+        top_white, top_black = 0, 0
 
-        bottom_player = "white" if bottom_white_score >= bottom_black_score else "black"
+        for r in [6, 7]:
+            for c in range(8):
+                crop = board_img[int(r*cell_h):int((r+1)*cell_h), int(c*cell_w):int((c+1)*cell_w)]
+                occ_sq = self.detect_square_occupancy(crop)
+                if occ_sq == 'W': bottom_white += 1
+                elif occ_sq == 'B': bottom_black += 1
+
+        for r in [0, 1]:
+            for c in range(8):
+                crop = board_img[int(r*cell_h):int((r+1)*cell_h), int(c*cell_w):int((c+1)*cell_w)]
+                occ_sq = self.detect_square_occupancy(crop)
+                if occ_sq == 'W': top_white += 1
+                elif occ_sq == 'B': top_black += 1
+
+        # Bottom player is White if bottom ranks have more white than black pieces
+        if (bottom_white + top_black) >= (bottom_black + top_white):
+            bottom_player = "white"
+        else:
+            bottom_player = "black"
+
         is_white_view = (bottom_player == "white")
 
         # Step 2: Build occupancy map for all 64 squares
@@ -226,18 +260,8 @@ class BoardVision:
         for r in range(8):
             for c in range(8):
                 sq = chess.square(c, 7 - r) if is_white_view else chess.square(7 - c, r)
-
                 crop = board_img[int(r*cell_h):int((r+1)*cell_h), int(c*cell_w):int((c+1)*cell_w)]
-                corners = np.concatenate([crop[:4,:4], crop[:4,-4:], crop[-4:,:4], crop[-4:,-4:]], axis=0)
-                bg = np.median(corners, axis=(0,1))
-                center = crop[int(crop.shape[0]*0.2):int(crop.shape[0]*0.8), int(crop.shape[1]*0.2):int(crop.shape[1]*0.8)]
-                diff = np.abs(center.astype(np.float32) - bg).sum(axis=-1)
-                fg = (diff > 35)
-                if np.mean(fg) < 0.10:
-                    occ[sq] = '.'
-                else:
-                    bright = np.mean(center[fg])
-                    occ[sq] = 'W' if bright > 135 else 'B'
+                occ[sq] = self.detect_square_occupancy(crop)
 
         return occ, bottom_player
 
@@ -260,7 +284,7 @@ class BoardVision:
                     c += 1
             return c
 
-        def search_from(start_b, limit_depth, max_nodes=300):
+        def search_from(start_b, limit_depth, max_nodes=500):
             pq = []
             init_diff = diff_count(start_b)
             if init_diff == 0:
@@ -291,27 +315,32 @@ class BoardVision:
                         heapq.heappush(pq, (cur_diff, d + 1, cnt, nb))
             return None
 
-        # 1. Search forward from current_board (fastest: depth 1..2, max 300 nodes)
+        # 1. Direct check if current_board matches screen (0 diff)
+        if current_board is not None and diff_count(current_board) == 0:
+            self.initialize_reference(board_img)
+            return current_board, bottom_player, True
+
+        # 2. Search forward from current_board (fastest: depth 1..2, max 500 nodes)
         if current_board is not None:
-            res = search_from(current_board, limit_depth=2, max_nodes=300)
+            res = search_from(current_board, limit_depth=2, max_nodes=500)
             if res:
                 self.initialize_reference(board_img)
                 return res, bottom_player, True
 
-        # 2. Try depth 3 from current_board
+        # 3. Try depth 3..4 from current_board
         if current_board is not None:
-            res = search_from(current_board, limit_depth=3, max_nodes=300)
+            res = search_from(current_board, limit_depth=4, max_nodes=800)
             if res:
                 self.initialize_reference(board_img)
                 return res, bottom_player, True
 
-        # 3. Direct check of standard initial board
+        # 4. Direct check of standard initial board
         if diff_count(chess.Board()) == 0:
             self.initialize_reference(board_img)
             return chess.Board(), bottom_player, True
 
-        # 4. Search from standard initial board (limit depth 2, max 300 nodes)
-        res = search_from(chess.Board(), limit_depth=2, max_nodes=300)
+        # 5. Search from standard initial board (opening up to 6 plies / 3 moves, max 1000 nodes)
+        res = search_from(chess.Board(), limit_depth=6, max_nodes=1000)
         if res:
             self.initialize_reference(board_img)
             return res, bottom_player, True

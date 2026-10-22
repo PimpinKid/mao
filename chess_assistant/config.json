@@ -1,10 +1,10 @@
 {
   "stockfish_path": "/opt/homebrew/bin/stockfish",
   "board_bbox": {
-    "left": 446,
-    "top": 117,
-    "width": 669,
-    "height": 669
+    "left": 678,
+    "top": 203,
+    "width": 559,
+    "height": 559
   },
   "player_color": "white",
   "engine_depth": 18,

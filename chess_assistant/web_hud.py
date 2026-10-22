@@ -29,6 +29,8 @@ class ChessStateHolder:
             "depth": 0,
             "explanation": "Ожидание первого хода...",
             "last_move": None,
+            "reply_move_uci": None,
+            "reply_move_san": None,
             "is_my_turn": True,
             "lines": []
         }
@@ -142,10 +144,18 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const oppColor = (data.player_color === 'white') ? 'ЧЕРНЫХ' : 'БЕЛЫХ';
             badge.className = 'badge yellow';
             badge.innerText = 'ХОД СОПЕРНИКА (' + oppColor + ')';
-            moveLabel.innerText = 'СТАТУС';
-            bestMove.className = 'best-move waiting';
-            bestMove.innerText = '⏳ Ожидание хода ' + oppColor;
-            document.getElementById('explanationText').innerText = 'Соперник думает. Ожидайте ход на доске...';
+            
+            if (data.reply_move_san) {
+              moveLabel.innerText = 'ОЖИДАЕТСЯ ' + (data.best_move_san || '') + ' → ВАШ ОТВЕТ:';
+              bestMove.className = 'best-move';
+              bestMove.innerText = data.reply_move_san;
+              document.getElementById('explanationText').innerText = 'Соперник выбирает ход. Лучший ответ при ' + data.best_move_san + ' — ход ' + data.reply_move_san;
+            } else {
+              moveLabel.innerText = 'СТАТУС';
+              bestMove.className = 'best-move waiting';
+              bestMove.innerText = '⏳ Ожидание хода ' + oppColor;
+              document.getElementById('explanationText').innerText = 'Соперник думает. Ожидайте ход на доске...';
+            }
             document.getElementById('altMoves').innerHTML = '';
           }
 
