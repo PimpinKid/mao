@@ -189,6 +189,121 @@ class BoardVision:
 
         return None, best_score, {}
 
+    def get_board_occupancy(self, board_img: np.ndarray = None) -> tuple[dict, str]:
+        """
+        Scans all 64 squares directly to determine occupancy ('W', 'B', '.')
+        and automatically identifies if the bottom player is White or Black.
+        """
+        if board_img is None:
+            board_img = self.capture_board_image()
+
+        h, w, _ = board_img.shape
+        cell_w = w / 8.0
+        cell_h = h / 8.0
+
+        # Step 1: Detect whether bottom row has White or Black pieces
+        bottom_white_score = 0
+        bottom_black_score = 0
+        for c in range(8):
+            b_crop = board_img[int(7*cell_h):int(8*cell_h), int(c*cell_w):int((c+1)*cell_w)]
+            corners = np.concatenate([b_crop[:4,:4], b_crop[:4,-4:], b_crop[-4:,:4], b_crop[-4:,-4:]], axis=0)
+            bg = np.median(corners, axis=(0,1))
+            center = b_crop[int(b_crop.shape[0]*0.2):int(b_crop.shape[0]*0.8), int(b_crop.shape[1]*0.2):int(b_crop.shape[1]*0.8)]
+            diff = np.abs(center.astype(np.float32) - bg).sum(axis=-1)
+            fg = (diff > 35)
+            if np.mean(fg) > 0.10:
+                bright = np.mean(center[fg])
+                if bright > 135:
+                    bottom_white_score += 1
+                else:
+                    bottom_black_score += 1
+
+        bottom_player = "white" if bottom_white_score >= bottom_black_score else "black"
+        is_white_view = (bottom_player == "white")
+
+        # Step 2: Build occupancy map for all 64 squares
+        occ = {}
+        for r in range(8):
+            for c in range(8):
+                sq = chess.square(c, 7 - r) if is_white_view else chess.square(7 - c, r)
+
+                crop = board_img[int(r*cell_h):int((r+1)*cell_h), int(c*cell_w):int((c+1)*cell_w)]
+                corners = np.concatenate([crop[:4,:4], crop[:4,-4:], crop[-4:,:4], crop[-4:,-4:]], axis=0)
+                bg = np.median(corners, axis=(0,1))
+                center = crop[int(crop.shape[0]*0.2):int(crop.shape[0]*0.8), int(crop.shape[1]*0.2):int(crop.shape[1]*0.8)]
+                diff = np.abs(center.astype(np.float32) - bg).sum(axis=-1)
+                fg = (diff > 35)
+                if np.mean(fg) < 0.10:
+                    occ[sq] = '.'
+                else:
+                    bright = np.mean(center[fg])
+                    occ[sq] = 'W' if bright > 135 else 'B'
+
+        return occ, bottom_player
+
+    def sync_board_state(self, current_board: chess.Board = None, max_depth: int = 8) -> tuple[chess.Board, str, bool]:
+        """
+        Directly scans screen, detects occupancy, and reconstructs the exact legal board position.
+        Returns:
+            (synced_board, bottom_player, success_bool)
+        """
+        import heapq
+        board_img = self.capture_board_image()
+        occ, bottom_player = self.get_board_occupancy(board_img)
+
+        def diff_count(b):
+            c = 0
+            for sq in chess.SQUARES:
+                p = b.piece_at(sq)
+                exp = 'W' if (p and p.color == chess.WHITE) else ('B' if (p and p.color == chess.BLACK) else '.')
+                if occ.get(sq, '.') != exp:
+                    c += 1
+            return c
+
+        def search_from(start_b, limit_depth):
+            pq = []
+            init_diff = diff_count(start_b)
+            if init_diff == 0:
+                return start_b
+            cnt = 0
+            heapq.heappush(pq, (init_diff, 0, cnt, start_b))
+            visited = set()
+
+            while pq:
+                h, d, _, bd = heapq.heappop(pq)
+                if h == 0:
+                    return bd
+                if d >= limit_depth:
+                    continue
+                fen_key = bd.board_fen()
+                if fen_key in visited:
+                    continue
+                visited.add(fen_key)
+
+                for m in bd.legal_moves:
+                    nb = bd.copy()
+                    nb.push(m)
+                    cur_diff = diff_count(nb)
+                    if cur_diff <= h:
+                        cnt += 1
+                        heapq.heappush(pq, (cur_diff, d + 1, cnt, nb))
+            return None
+
+        # 1. Search forward from current_board (fastest: depth 1..4)
+        if current_board is not None:
+            res = search_from(current_board, limit_depth=4)
+            if res:
+                self.initialize_reference(board_img)
+                return res, bottom_player, True
+
+        # 2. Search from standard initial board (up to depth max_depth)
+        res = search_from(chess.Board(), limit_depth=max_depth)
+        if res:
+            self.initialize_reference(board_img)
+            return res, bottom_player, True
+
+        return (current_board or chess.Board()), bottom_player, False
+
     def force_update_reference(self):
         """Force re-capture reference snapshot (e.g. after manual correction)."""
         self.initialize_reference()

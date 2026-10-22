@@ -84,11 +84,14 @@ class ChessAssistantApp:
 
         is_my_turn = (self.board.turn == (chess.WHITE if self.player_color == "white" else chess.BLACK))
 
+        bottom_str = "БЕЛЫЕ" if self.player_color == "white" else "ЧЕРНЫЕ"
+
         print("\n" + "═" * 60)
         if trigger_reason:
-            print(f"[*] Событие: {trigger_reason}")
-        print(f"[*] Позиция в памяти: {C_BOLD}Ход {move_num} ({turn_str}){C_RESET}")
-        print(f"[*] История ходов: {history_str}")
+            print(f"[*] Событие:          {trigger_reason}")
+        print(f"[*] Игрок снизу (ВЫ): {C_CYAN}{C_BOLD}{bottom_str}{C_RESET} (определено со снимка)")
+        print(f"[*] Чей сейчас ход:   {C_BOLD}{turn_str}{C_RESET} (Ход {move_num})")
+        print(f"[*] История ходов:    {history_str}")
         print(f"┌────────────────────────────────────────────────────────┐")
         if is_my_turn:
             print(f"│ {C_BOLD}СТАТУС:{C_RESET}      {C_GREEN}{C_BOLD}ВАШ ХОД ({turn_str}){C_RESET}")
@@ -106,17 +109,24 @@ class ChessAssistantApp:
         print(f"└────────────────────────────────────────────────────────┘")
         print("═" * 60)
 
-    def analyze_current_position(self, reason: str = "Ручной запрос"):
+    def analyze_current_position(self, reason: str = "Запрос по Enter"):
         with self.lock:
-            # Check if screen contains an opponent move
-            detected_move, score, details = self.vision.detect_move(self.board)
-            if detected_move:
-                self.board.push(detected_move)
-                reason = f"Обнаружен ход соперника на экране: {detected_move.uci()}"
+            # 1. Directly scan screen and synchronize exact board state!
+            synced_board, bottom_player, success = self.vision.sync_board_state(self.board)
+            if success:
+                self.board = synced_board
+                reason = "Доска мгновенно синхронизирована со снимка экрана"
 
+            # Auto-update player perspective if bottom player changed (White <-> Black)
+            if bottom_player != self.player_color:
+                self.player_color = bottom_player
+                self.config["player_color"] = bottom_player
+                self.vision.update_config(self.config["board_bbox"], self.player_color)
+
+            # 2. Evaluate with Stockfish for the current board
             analysis = self.engine.evaluate(
                 self.board,
-                time_limit=self.config.get("engine_time", 0.2),
+                time_limit=self.config.get("engine_time", 0.25),
                 depth=self.config.get("engine_depth", 18),
                 multipv=self.config.get("multipv", 3)
             )
@@ -263,15 +273,12 @@ class ChessAssistantApp:
         print("          ШАХМАТНЫЙ ПОДСКАЗЧИК ГОТОВ К ИГРЕ          ")
         print("=" * 60)
         print("Горячие команды терминала:")
-        print("  [Enter] / h      - Получить подсказку / обновить позицию")
+        print("  [Enter]          - СКАН ЭКРАНА И ЛУЧШИЙ ХОД (для игрока снизу)")
         print("  auto on / off    - Включить / выключить авто-сканирование экрана")
-        print("  cal              - Откалибровать доску (если открыли Chess.com)")
-        print("  moves <ходы>     - Синхронизировать партию (e4 e5 Nf3...)")
-        print("  sync             - Перекалибровать опорный снимок доски")
-        print("  flip             - Сменить цвет (Белые <-> Черные)")
-        print("  m <ход>          - Ввести 1 ход вручную (например: m e2e4)")
-        print("  u                - Отменить последний ход")
-        print("  new / reset      - Начать новую партию с 1-го хода")
+        print("  cal              - Откалибровать доску под новое окно")
+        print("  moves <ходы>     - Ввести ходы вручную (если нужно)")
+        print("  flip             - Принудительно сменить цвет (Белые <-> Черные)")
+        print("  new / reset      - Сброс на стартовую позицию")
         print("  q                - Выход")
         print("=" * 60)
 
