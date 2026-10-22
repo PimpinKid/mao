@@ -152,12 +152,16 @@ class ChessAssistantApp:
                 with self.lock:
                     detected_move, score, details = self.vision.detect_move(self.board)
                     if detected_move:
-                        print(f"\n{C_CYAN}[+] Авто-детекция: ход {detected_move.uci()}{C_RESET}")
-                        self.board.push(detected_move)
-                        analysis = self.engine.evaluate(self.board)
-                        self.print_hint(analysis, trigger_reason=f"Авто-детекция: {detected_move.uci()}")
-                        self._update_hud(analysis)
-            time.sleep(0.4)
+                        # Require stability: verify move is still present after 150ms (filters animations/cursor)
+                        time.sleep(0.15)
+                        confirm_move, _, _ = self.vision.detect_move(self.board)
+                        if confirm_move == detected_move:
+                            print(f"\n{C_CYAN}[+] Авто-детекция: ход {detected_move.uci()}{C_RESET}")
+                            self.board.push(detected_move)
+                            analysis = self.engine.evaluate(self.board)
+                            self.print_hint(analysis, trigger_reason=f"Авто-детекция: {detected_move.uci()}")
+                            self._update_hud(analysis)
+            time.sleep(0.5)
 
     def reset_game(self):
         with self.lock:

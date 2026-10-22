@@ -81,11 +81,28 @@ class BoardVision:
         """Save the initial reference state of all 64 squares."""
         self.last_square_images = self.get_square_crops(board_img)
 
+    def is_cell_empty(self, crop: np.ndarray) -> bool:
+        """Determines if a square crop has NO chess piece in its central area."""
+        h, w, _ = crop.shape
+        y1, y2 = int(h * 0.25), int(h * 0.75)
+        x1, x2 = int(w * 0.25), int(w * 0.75)
+        center = crop[y1:y2, x1:x2]
+
+        # Check dark border or dark piece pixels (RGB all < 85)
+        dark_ratio = np.mean(np.all(center < 85, axis=-1))
+        # Check white piece pixels (RGB all > 215)
+        white_ratio = np.mean(np.all(center > 215, axis=-1))
+
+        # An empty square has zero piece pixels in its center
+        return (dark_ratio < 0.04 and white_ratio < 0.06)
+
     def detect_move(self, board: chess.Board, threshold: float = 18.0):
         """
         Compares current screen with the last reference snapshot.
-        Evaluates legal moves in `board.legal_moves` and selects the move
-        whose involved squares show the highest pixel difference.
+        Strictly verifies that:
+        1. Both from_sq and to_sq changed significantly (>= threshold).
+        2. from_sq became EMPTY (piece left).
+        3. to_sq became OCCUPIED (piece arrived).
         
         Returns:
             (detected_move: chess.Move or None, max_diff: float, details: dict)
@@ -122,8 +139,20 @@ class BoardVision:
             d_from = diffs.get(from_sq, 0.0)
             d_to = diffs.get(to_sq, 0.0)
 
-            # Basic move score (both from and to must show change)
+            # Both from and to must show significant pixel change
             if d_from < threshold or d_to < threshold:
+                continue
+
+            # Strict piece-presence validation:
+            curr_from = curr_crops.get(from_sq)
+            curr_to = curr_crops.get(to_sq)
+
+            # 1. Origin square MUST now be empty (piece left)!
+            if curr_from is not None and not self.is_cell_empty(curr_from):
+                continue
+
+            # 2. Destination square MUST now have a piece (NOT empty)!
+            if curr_to is not None and self.is_cell_empty(curr_to):
                 continue
 
             score = d_from + d_to
